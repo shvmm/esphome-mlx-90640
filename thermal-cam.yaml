@@ -1,0 +1,131 @@
+substitutions:
+  name: thermal-cam
+  friendly_name: Thermal Camera
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: seeed_xiao_esp32s3
+  framework:
+    type: esp-idf
+    version: 6.2.0 # Comment to use the recommended version
+    source: github://espressif/esp-idf@master
+
+logger:
+
+api:
+  # encryption:
+  #   key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+  #   password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid_laptop
+  password: !secret wifi_password_laptop
+  ap:
+    ssid: "${name} fallback"
+
+captive_portal:
+
+# Normal ESPHome page at http://thermal-cam.local/  (entities, logs, OTA)
+# Heatmap at           http://thermal-cam.local/thermal
+web_server:
+  port: 80
+  version: 3
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [mlx90640]
+
+# XIAO ESP32-S3: D4 = GPIO5 (SDA), D5 = GPIO6 (SCL). Power the sensor from 3V3.
+i2c:
+  sda: GPIO5
+  scl: GPIO6
+  # The MLX90640 supports 1 MHz. Each sub-page is ~1.7 kB, so 1 MHz keeps reads
+  # short. If you see I2C errors (long wires), drop to 400kHz.
+  frequency: 1MHz
+  scan: true
+
+mlx90640:
+  id: thermal
+  address: 0x33
+  # Defaults used until changed from the entities below (changes are saved
+  # on the device and survive reboots).
+  # Sub-page rate; one full 32x24 image = 2 sub-pages. 4Hz is a good noise/speed balance.
+  refresh_rate: 4Hz
+  resolution: 18
+  emissivity: 0.95
+  # How often the summary sensors are sent to Home Assistant (also adjustable
+  # at runtime via "HA Publish Interval"). The heatmap updates at the full rate.
+  update_interval: 10s
+  min_temperature:
+    name: "Min Temperature"
+  max_temperature:
+    name: "Max Temperature"
+  mean_temperature:
+    name: "Mean Temperature"
+  center_temperature:
+    name: "Center Temperature"
+  ambient_temperature:
+    name: "Sensor Die Temperature"
+  frame_rate:
+    name: "Frame Rate"
+  supply_voltage:
+    name: "Sensor Supply Voltage"
+  bad_pixels:
+    name: "Bad Pixels"
+  i2c_errors:
+    name: "I2C Errors"
+
+# ---- Runtime controls (shown on the ESPHome web page and in Home Assistant;
+# ---- the /thermal heatmap page uses the same settings)
+
+select:
+  - platform: mlx90640
+    refresh_rate:
+      name: "Refresh Rate"
+    resolution:
+      name: "ADC Resolution"
+    pattern:
+      name: "Readout Pattern"
+    palette:
+      name: "Heatmap Palette"
+
+number:
+  - platform: mlx90640
+    emissivity:
+      name: "Emissivity"
+    reflected_offset:
+      name: "Reflected Temperature Offset"
+    smoothing:
+      name: "Smoothing"
+    range_min:
+      name: "Heatmap Range Min"
+    range_max:
+      name: "Heatmap Range Max"
+    publish_interval:
+      name: "HA Publish Interval"
+
+switch:
+  - platform: mlx90640
+    interpolate_bad_pixels:
+      name: "Fix Bad Pixels"
+    auto_range:
+      name: "Heatmap Auto Range"
+    mirror:
+      name: "Heatmap Mirror"
+    rotate_180:
+      name: "Heatmap Rotate 180"
+    freeze:
+      name: "Freeze Heatmap"
+
+button:
+  - platform: mlx90640
+    reinitialize:
+      name: "Reinitialize Sensor"
