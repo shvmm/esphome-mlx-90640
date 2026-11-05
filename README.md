@@ -1,6 +1,9 @@
 # esphome-mlx-90640
 Performant and feature complete implementation for the Melexis MLX 90640 in ESPHome
 
+Start by compiling the example config and take it from there.
+`esphome compile thermal_cam.yaml`
+
 Verified working using a XIAO ESP32-S3.
 <img width="730" height="886" alt="image" src="https://github.com/user-attachments/assets/ab878865-ad5b-49d4-9270-a2f2322adcd6" />
 
