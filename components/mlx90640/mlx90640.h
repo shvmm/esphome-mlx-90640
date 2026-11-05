@@ -32,8 +32,13 @@ enum Setting : uint8_t {
   SETTING_MIRROR,
   SETTING_ROTATE_180,
   SETTING_FREEZE,
+  SETTING_CAMERA_OVERLAY,  // switch: min/max/centre text, hotspot and colour bar on the camera image
+  // numbers (camera)
+  SETTING_JPEG_QUALITY,  // 10..100
   SETTING_COUNT,
 };
+
+class MLX90640Camera;
 
 // Implemented by the entity classes so web-page changes go through the entity
 // (state gets published to Home Assistant / web UI and persisted).
@@ -62,7 +67,16 @@ class MLX90640Component : public PollingComponent, public i2c::I2CDevice, public
   void register_entity(Setting s, SettingEntity *e) { this->entities_[s] = e; }
   void request_reinit() { this->reinit_requested_ = true; }
 
+  // Frame access for the camera (main loop). Copies the last image in display
+  // orientation (mirror / rotate applied).
+  bool has_frame() const { return this->has_frame_ && this->ready_; }
+  uint32_t get_frame_count() const { return this->frame_count_; }
+  void copy_display_frame(float *dst) const;
+  void set_camera(MLX90640Camera *camera) { this->camera_ = camera; }
+
   // YAML defaults
+  void set_jpeg_quality(uint8_t q) { this->settings_[SETTING_JPEG_QUALITY] = q; }
+  void set_camera_overlay(bool on) { this->settings_[SETTING_CAMERA_OVERLAY] = on ? 1.0f : 0.0f; }
   void set_refresh_rate(uint8_t code) { this->settings_[SETTING_REFRESH_RATE] = code; }
   void set_resolution(uint8_t code) { this->settings_[SETTING_RESOLUTION] = code; }
   void set_emissivity(float e) { this->settings_[SETTING_EMISSIVITY] = e; }
@@ -85,8 +99,12 @@ class MLX90640Component : public PollingComponent, public i2c::I2CDevice, public
   void apply_pending_web_changes_();
   void finish_frame_(float ta);
   bool flag_(Setting s) const { return this->settings_[s] > 0.5f; }
+  // Sensor-array index of display pixel (x, y), honouring mirror / rotate.
+  int display_source_index_(int x, int y) const;
+  void handle_snapshot_(AsyncWebServerRequest *request);
 
   web_server_base::WebServerBase *base_;
+  MLX90640Camera *camera_{nullptr};
 
   float settings_[SETTING_COUNT]{};
   SettingEntity *entities_[SETTING_COUNT]{};

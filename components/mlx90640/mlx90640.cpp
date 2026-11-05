@@ -1,5 +1,8 @@
 #include "mlx90640.h"
 #include "heatmap_page.h"
+#ifdef USE_MLX90640_CAMERA
+#include "mlx90640_camera.h"
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -46,6 +49,8 @@ static const SettingInfo SETTINGS[SETTING_COUNT] = {
     {"mirror", 0, 1, 0, true},
     {"rotate_180", 0, 1, 0, true},
     {"freeze", 0, 1, 0, true},
+    {"camera_overlay", 0, 1, 1, true},
+    {"jpeg_quality", 10, 100, 80, true},
 };
 
 MLX90640Component::MLX90640Component(web_server_base::WebServerBase *base) : base_(base) {
@@ -354,6 +359,24 @@ void MLX90640Component::update() {
     this->supply_voltage_sensor_->publish_state(this->vdd_);
 }
 
+// ---------------------------------------------------------------- frame access
+
+int MLX90640Component::display_source_index_(int x, int y) const {
+  if (this->flag_(SETTING_ROTATE_180)) {
+    x = MLX_COLS - 1 - x;
+    y = MLX_ROWS - 1 - y;
+  }
+  if (this->flag_(SETTING_MIRROR))
+    x = MLX_COLS - 1 - x;
+  return y * MLX_COLS + x;
+}
+
+void MLX90640Component::copy_display_frame(float *dst) const {
+  for (int y = 0; y < MLX_ROWS; y++)
+    for (int x = 0; x < MLX_COLS; x++)
+      dst[y * MLX_COLS + x] = this->output_[this->display_source_index_(x, y)];
+}
+
 // ---------------------------------------------------------------- web
 
 bool MLX90640Component::canHandle(AsyncWebServerRequest *request) const {
@@ -363,7 +386,26 @@ bool MLX90640Component::canHandle(AsyncWebServerRequest *request) const {
     return url == "/thermal/set";
   if (request->method() != HTTP_GET)
     return false;
-  return url == "/thermal" || url == "/thermal/" || url == "/thermal.json";
+  return url == "/thermal" || url == "/thermal/" || url == "/thermal.json" || url == "/thermal.jpg";
+}
+
+// GET /thermal.jpg - latest camera image (asks the camera for a fresh one and
+// waits briefly for it). Runs on the HTTP server task.
+void MLX90640Component::handle_snapshot_(AsyncWebServerRequest *request) {
+#ifdef USE_MLX90640_CAMERA
+  if (this->camera_ != nullptr) {
+    std::shared_ptr<camera::CameraImage> image = this->camera_->get_fresh_image(2000);
+    if (image) {
+      auto *response = request->beginResponse(200, "image/jpeg", image->get_data_buffer(), image->get_data_length());
+      response->addHeader("Cache-Control", "no-store");
+      request->send(response);  // sent synchronously, while `image` keeps the buffer alive
+      return;
+    }
+    request->send(503, "text/plain", "No image yet");
+    return;
+  }
+#endif
+  request->send(404, "text/plain", "Camera not enabled (add 'camera:' under 'mlx90640:')");
 }
 
 void MLX90640Component::handleRequest(AsyncWebServerRequest *request) {
@@ -392,6 +434,10 @@ void MLX90640Component::handleRequest(AsyncWebServerRequest *request) {
     return;
   }
 
+  if (url == "/thermal.jpg") {
+    this->handle_snapshot_(request);
+    return;
+  }
   if (url != "/thermal.json") {
     request->send(200, "text/html", HEATMAP_PAGE);
     return;
@@ -401,11 +447,12 @@ void MLX90640Component::handleRequest(AsyncWebServerRequest *request) {
   // worst mixes two consecutive frames in one response.
   AsyncResponseStream *stream = request->beginResponseStream("application/json");
   stream->printf("{\"w\":%d,\"h\":%d,\"ready\":%s,\"ta\":%.2f,\"vdd\":%.3f,\"min\":%.2f,\"max\":%.2f,\"mean\":%.2f,"
-                 "\"fps\":%.2f,\"frame\":%u,\"i2c_errors\":%u,\"cfg\":{",
+                 "\"fps\":%.2f,\"frame\":%u,\"i2c_errors\":%u,\"camera\":%s,\"cfg\":{",
                  MLX_COLS, MLX_ROWS, this->ready_ ? "true" : "false", std::isfinite(this->ta_) ? this->ta_ : 0.0f,
                  std::isfinite(this->vdd_) ? this->vdd_ : 0.0f, std::isfinite(this->min_) ? this->min_ : 0.0f,
                  std::isfinite(this->max_) ? this->max_ : 0.0f, std::isfinite(this->mean_) ? this->mean_ : 0.0f,
-                 this->fps_, static_cast<unsigned>(this->frame_count_), static_cast<unsigned>(this->i2c_errors_));
+                 this->fps_, static_cast<unsigned>(this->frame_count_), static_cast<unsigned>(this->i2c_errors_),
+                 this->camera_ != nullptr ? "true" : "false");
   for (int i = 0; i < SETTING_COUNT; i++)
     stream->printf("%s\"%s\":%g", i ? "," : "", SETTINGS[i].key, this->get_setting(static_cast<Setting>(i)));
   stream->print("},\"t\":");
@@ -417,20 +464,11 @@ void MLX90640Component::handleRequest(AsyncWebServerRequest *request) {
   }
 
   // Pixels are emitted in display orientation (mirror / rotate applied here).
-  const bool mirror = this->flag_(SETTING_MIRROR);
-  const bool rotate = this->flag_(SETTING_ROTATE_180);
   stream->print("[");
   char buf[16];
   for (int y = 0; y < MLX_ROWS; y++) {
     for (int x = 0; x < MLX_COLS; x++) {
-      int sx = x, sy = y;
-      if (rotate) {
-        sx = MLX_COLS - 1 - sx;
-        sy = MLX_ROWS - 1 - sy;
-      }
-      if (mirror)
-        sx = MLX_COLS - 1 - sx;
-      const float v = this->output_[sy * MLX_COLS + sx];
+      const float v = this->output_[this->display_source_index_(x, y)];
       const char *sep = (x || y) ? "," : "";
       if (std::isfinite(v)) {
         snprintf(buf, sizeof(buf), "%s%.1f", sep, v);

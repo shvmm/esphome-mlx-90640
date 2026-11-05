@@ -1,13 +1,15 @@
 """MLX90640 32x24 thermal camera with a built-in web heatmap (/thermal).
 
 Runtime settings are exposed through the number / select / switch / button
-platforms of this component (see those sub-packages).
+platforms of this component (see those sub-packages). An optional `camera:`
+block adds a camera entity (JPEG) that Home Assistant shows natively.
 """
 
 import esphome.codegen as cg
 from esphome.components import i2c, sensor, web_server_base
 from esphome.components.web_server_base import CONF_WEB_SERVER_BASE_ID
 import esphome.config_validation as cv
+from esphome.core.entity_helpers import setup_entity
 from esphome.const import (
     CONF_ID,
     DEVICE_CLASS_TEMPERATURE,
@@ -20,12 +22,24 @@ from esphome.const import (
 )
 
 DEPENDENCIES = ["i2c", "esp32"]
-AUTO_LOAD = ["sensor", "web_server_base"]
+AUTO_LOAD = ["sensor", "web_server_base", "camera"]
 
 CONF_MLX90640_ID = "mlx90640_id"
 CONF_REFRESH_RATE = "refresh_rate"
 CONF_RESOLUTION = "resolution"
 CONF_EMISSIVITY = "emissivity"
+CONF_CAMERA = "camera"
+CONF_JPEG_QUALITY = "jpeg_quality"
+CONF_MAX_FRAMERATE = "max_framerate"
+CONF_IDLE_FRAMERATE = "idle_framerate"
+CONF_OVERLAY = "overlay"
+
+CAMERA_RESOLUTIONS = {
+    "160x120": (160, 120),
+    "320x240": (320, 240),
+    "480x360": (480, 360),
+    "640x480": (640, 480),
+}
 
 # Option labels; their order is the C++ setting value (index).
 REFRESH_RATE_OPTIONS = ["0.5 Hz", "1 Hz", "2 Hz", "4 Hz", "8 Hz", "16 Hz", "32 Hz", "64 Hz"]
@@ -41,6 +55,23 @@ mlx90640_ns = cg.esphome_ns.namespace("mlx90640")
 MLX90640Component = mlx90640_ns.class_(
     "MLX90640Component", cg.PollingComponent, i2c.I2CDevice
 )
+MLX90640Camera = mlx90640_ns.class_("MLX90640Camera", cg.Component, cg.EntityBase)
+
+CAMERA_SCHEMA = cv.ENTITY_BASE_SCHEMA.extend(
+    {
+        cv.GenerateID(): cv.declare_id(MLX90640Camera),
+        cv.Optional(CONF_RESOLUTION, default="320x240"): cv.one_of(
+            *CAMERA_RESOLUTIONS, lower=True
+        ),
+        # Defaults for the runtime "JPEG Quality" number / "Camera Overlay" switch
+        cv.Optional(CONF_JPEG_QUALITY, default=80): cv.int_range(min=10, max=100),
+        cv.Optional(CONF_OVERLAY, default=True): cv.boolean,
+        # Upper limit while Home Assistant streams (sensor gives 2-4 frames/s at 4-8 Hz)
+        cv.Optional(CONF_MAX_FRAMERATE, default=4.0): cv.float_range(min=0.1, max=16.0),
+        # Background refresh of the HA preview when nobody streams (0 = off)
+        cv.Optional(CONF_IDLE_FRAMERATE, default=0.1): cv.float_range(min=0.0, max=1.0),
+    }
+).extend(cv.COMPONENT_SCHEMA)
 
 TEMPERATURE_SCHEMA = sensor.sensor_schema(
     unit_of_measurement=UNIT_CELSIUS,
@@ -123,6 +154,7 @@ CONFIG_SCHEMA = (
                 min=0.1, max=1.0
             ),
             **{cv.Optional(key): schema for key, (_, schema) in SENSORS.items()},
+            cv.Optional(CONF_CAMERA): CAMERA_SCHEMA,
         }
     )
     .extend(cv.polling_component_schema("10s"))
@@ -144,3 +176,19 @@ async def to_code(config):
         if key in config:
             sens = await sensor.new_sensor(config[key])
             cg.add(getattr(var, setter)(sens))
+
+    if cam := config.get(CONF_CAMERA):
+        cg.add_define("USE_CAMERA")
+        cg.add_define("USE_MLX90640_CAMERA")
+        cam_var = cg.new_Pvariable(cam[CONF_ID])
+        await setup_entity(cam_var, cam, "camera")
+        await cg.register_component(cam_var, cam)
+        await cg.register_parented(cam_var, var)
+        width, height = CAMERA_RESOLUTIONS[cam[CONF_RESOLUTION]]
+        cg.add(cam_var.set_resolution(width, height))
+        cg.add(cam_var.set_max_update_interval(int(1000 / cam[CONF_MAX_FRAMERATE])))
+        idle = cam[CONF_IDLE_FRAMERATE]
+        cg.add(cam_var.set_idle_update_interval(int(1000 / idle) if idle > 0 else 0))
+        cg.add(var.set_jpeg_quality(cam[CONF_JPEG_QUALITY]))
+        cg.add(var.set_camera_overlay(cam[CONF_OVERLAY]))
+        cg.add(var.set_camera(cam_var))

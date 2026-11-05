@@ -17,6 +17,7 @@ NUMBERS = {
     "range_min": ("SETTING_RANGE_MIN", -40, 300, 0.5, UNIT_CELSIUS, "mdi:thermometer-low"),
     "range_max": ("SETTING_RANGE_MAX", -40, 300, 0.5, UNIT_CELSIUS, "mdi:thermometer-high"),
     "publish_interval": ("SETTING_PUBLISH_INTERVAL", 1, 3600, 1, UNIT_SECOND, "mdi:timer-outline"),
+    "jpeg_quality": ("SETTING_JPEG_QUALITY", 10, 100, 1, None, "mdi:image-filter-hdr"),
 }
 
 

@@ -18,6 +18,7 @@ SWITCHES = {
     "mirror": ("SETTING_MIRROR", "mdi:flip-horizontal", "RESTORE_DEFAULT_OFF"),
     "rotate_180": ("SETTING_ROTATE_180", "mdi:rotate-3d-variant", "RESTORE_DEFAULT_OFF"),
     "freeze": ("SETTING_FREEZE", "mdi:pause", "ALWAYS_OFF"),
+    "camera_overlay": ("SETTING_CAMERA_OVERLAY", "mdi:layers-outline", "RESTORE_DEFAULT_ON"),
 }
 
 CONFIG_SCHEMA = cv.Schema(

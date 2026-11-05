@@ -10,14 +10,17 @@ static const char HEATMAP_PAGE[] = R"HTML(<!DOCTYPE html>
 <title>Thermal camera</title>
 <style>
 :root{color-scheme:dark}
+*{box-sizing:border-box}
 body{margin:0;padding:12px;font:14px system-ui,sans-serif;background:#111;color:#eee;display:flex;flex-direction:column;align-items:center}
-.col{width:min(96vw,640px)}
+.col{width:100%;max-width:640px}
 h1{font-size:18px;margin:4px 0 10px}
 #wrap{position:relative}
 #view{width:100%;aspect-ratio:4/3;display:block;border-radius:6px;background:#000;cursor:crosshair}
 #tip{position:absolute;pointer-events:none;background:#000c;padding:2px 6px;border-radius:4px;font-size:12px;display:none}
 #bar{display:flex;align-items:center;gap:8px;margin-top:8px}
-#legend{flex:1;height:12px;border-radius:3px}
+#bar span{flex:none;white-space:nowrap}
+/* width:0 + min-width:0 stop the 256x1 canvas's intrinsic aspect ratio from forcing a huge width */
+#legend{flex:1 1 0;width:0;min-width:0;height:12px;border-radius:3px}
 #stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}
 .s{background:#1d1d1d;border-radius:6px;padding:6px 8px}.s span{color:#999;font-size:12px}.s b{display:block;font-size:18px}
 fieldset{border:1px solid #333;border-radius:6px;margin:12px 0 0;padding:8px 10px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
@@ -54,6 +57,11 @@ a{color:#8cf}
 <label>Smoothing <input type="number" data-key="smoothing" min="0" max="0.95" step="0.05"></label>
 <label><input type="checkbox" data-key="interpolate_bad_pixels"> Fix bad pixels</label>
 <label>HA publish s <input type="number" data-key="publish_interval" min="1" max="3600" step="1"></label>
+</fieldset>
+<fieldset class="col" id="camfs" style="display:none"><legend>Camera (Home Assistant)</legend>
+<label><input type="checkbox" data-key="camera_overlay"> Overlay</label>
+<label>JPEG quality <input type="number" data-key="jpeg_quality" min="10" max="100" step="1"></label>
+<a href="/thermal.jpg" target="_blank">Snapshot (JPEG)</a>
 </fieldset>
 <div id="st" class="col">Connecting&hellip;</div>
 <script>
@@ -133,6 +141,7 @@ async function poll(){
   const r=await fetch('/thermal.json',{cache:'no-store'});
   if(!r.ok)throw new Error('HTTP '+r.status);
   last=await r.json();fails=0;syncControls();
+  $('camfs').style.display=last.camera?'':'none';
   $('vmin').textContent=fmt(last.min);$('vmax').textContent=fmt(last.max);$('vta').textContent=fmt(last.ta);
   if(last.t){
    const c=[11*W+15,11*W+16,12*W+15,12*W+16].map(i=>last.t[i]).filter(v=>v!==null);

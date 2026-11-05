@@ -23,9 +23,18 @@ ota:
   - platform: esphome
   #   password: !secret ota_password
 
+network:
+    enable_ipv6: true
+    # min_ipv6_addr_count: 2
+
 wifi:
-  ssid: !secret wifi_ssid_laptop
-  password: !secret wifi_password_laptop
+  networks:
+  - ssid: !secret wifi_ssid_laptop
+    password: !secret wifi_password_laptop
+  - ssid: !secret wifi_ssid
+    password: !secret wifi_password
+  - ssid: !secret wifi_ssid_cubie
+    password: !secret wifi_password_cubie
   ap:
     ssid: "${name} fallback"
 
@@ -36,6 +45,9 @@ captive_portal:
 web_server:
   port: 80
   version: 3
+  # Link bar (Heatmap, JSON, Home Assistant, docs) at the top of the home page.
+  # Edit the LINKS list in this file to change it.
+  js_include: web/home_links.js
 
 external_components:
   - source:
@@ -82,6 +94,17 @@ mlx90640:
     name: "Bad Pixels"
   i2c_errors:
     name: "I2C Errors"
+  
+  # Camera entity for Home Assistant (live view + snapshots). Uses the same
+  # palette / range / mirror / rotate settings as the heatmap. Also served as
+  # http://thermal-cam.local/thermal.jpg
+  camera:
+    name: "Thermal Camera"
+    resolution: 320x240   # 160x120 / 320x240 / 480x360 / 640x480
+    jpeg_quality: 80      # default for the "JPEG Quality" number
+    overlay: true         # default for the "Camera Overlay" switch
+    max_framerate: 4      # cap while HA is streaming
+    idle_framerate: 0.1   # preview refresh when nobody streams (0 = off)
 
 # ---- Runtime controls (shown on the ESPHome web page and in Home Assistant;
 # ---- the /thermal heatmap page uses the same settings)
@@ -111,6 +134,8 @@ number:
       name: "Heatmap Range Max"
     publish_interval:
       name: "HA Publish Interval"
+    jpeg_quality:
+      name: "Camera JPEG Quality"
 
 switch:
   - platform: mlx90640
@@ -124,6 +149,8 @@ switch:
       name: "Heatmap Rotate 180"
     freeze:
       name: "Freeze Heatmap"
+    camera_overlay:
+      name: "Camera Overlay"
 
 button:
   - platform: mlx90640
