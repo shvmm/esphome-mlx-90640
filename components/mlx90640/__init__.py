@@ -22,7 +22,7 @@ from esphome.const import (
 )
 
 DEPENDENCIES = ["i2c", "esp32"]
-AUTO_LOAD = ["sensor", "web_server_base", "camera"]
+AUTO_LOAD = ["sensor", "camera"]
 
 CONF_MLX90640_ID = "mlx90640_id"
 CONF_REFRESH_RATE = "refresh_rate"
@@ -139,7 +139,9 @@ CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(MLX90640Component),
-            cv.GenerateID(CONF_WEB_SERVER_BASE_ID): cv.use_id(
+            # The heatmap page (/thermal) is served only when the config has a web
+            # server (web_server, captive_portal, ...); without one nothing listens.
+            cv.OnlyWith(CONF_WEB_SERVER_BASE_ID, "web_server_base"): cv.use_id(
                 web_server_base.WebServerBase
             ),
             # Defaults; the matching select/number entities (if configured)
@@ -163,8 +165,11 @@ CONFIG_SCHEMA = (
 
 
 async def to_code(config):
-    base = await cg.get_variable(config[CONF_WEB_SERVER_BASE_ID])
-    var = cg.new_Pvariable(config[CONF_ID], base)
+    var = cg.new_Pvariable(config[CONF_ID])
+    if CONF_WEB_SERVER_BASE_ID in config:
+        cg.add_define("USE_MLX90640_WEB")
+        base = await cg.get_variable(config[CONF_WEB_SERVER_BASE_ID])
+        cg.add(var.set_web_server_base(base))
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
 

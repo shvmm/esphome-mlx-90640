@@ -4,8 +4,11 @@
 
 #include "esphome/components/i2c/i2c.h"
 #include "esphome/components/sensor/sensor.h"
-#include "esphome/components/web_server_base/web_server_base.h"
 #include "esphome/core/component.h"
+#include "esphome/core/defines.h"
+#ifdef USE_MLX90640_WEB
+#include "esphome/components/web_server_base/web_server_base.h"
+#endif
 
 #include "mlx90640_calc.h"
 
@@ -47,9 +50,15 @@ class SettingEntity {
   virtual void apply_setting(float value) = 0;
 };
 
-class MLX90640Component : public PollingComponent, public i2c::I2CDevice, public AsyncWebHandler {
+class MLX90640Component : public PollingComponent,
+                          public i2c::I2CDevice
+#ifdef USE_MLX90640_WEB
+    ,
+                          public AsyncWebHandler
+#endif
+{
  public:
-  explicit MLX90640Component(web_server_base::WebServerBase *base);
+  MLX90640Component();
 
   void setup() override;
   void loop() override;
@@ -57,9 +66,12 @@ class MLX90640Component : public PollingComponent, public i2c::I2CDevice, public
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::WIFI - 1.0f; }
 
+#ifdef USE_MLX90640_WEB
   // Web handler: GET /thermal (page), GET /thermal.json (frame + settings), POST /thermal/set
+  void set_web_server_base(web_server_base::WebServerBase *base) { this->base_ = base; }
   bool canHandle(AsyncWebServerRequest *request) const override;
   void handleRequest(AsyncWebServerRequest *request) override;
+#endif
 
   // Settings API (main loop only). set_setting clamps, stores, applies, and returns the stored value.
   float get_setting(Setting s) const;
@@ -101,9 +113,11 @@ class MLX90640Component : public PollingComponent, public i2c::I2CDevice, public
   bool flag_(Setting s) const { return this->settings_[s] > 0.5f; }
   // Sensor-array index of display pixel (x, y), honouring mirror / rotate.
   int display_source_index_(int x, int y) const;
+#ifdef USE_MLX90640_WEB
   void handle_snapshot_(AsyncWebServerRequest *request);
 
-  web_server_base::WebServerBase *base_;
+  web_server_base::WebServerBase *base_{nullptr};
+#endif
   MLX90640Camera *camera_{nullptr};
 
   float settings_[SETTING_COUNT]{};
