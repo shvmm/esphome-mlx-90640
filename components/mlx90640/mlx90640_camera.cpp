@@ -131,8 +131,7 @@ void MLX90640Camera::dump_config() {
                 "MLX90640 Camera:\n"
                 "  Resolution: %ux%u\n"
                 "  Max framerate: %.1f fps\n"
-                "  Idle framerate: %.2f fps\n"
-                "  Snapshot URL: http://<device>/thermal.jpg",
+                "  Idle framerate: %.2f fps",
                 this->width_, this->height_, 1000.0f / this->max_update_interval_,
                 this->idle_update_interval_ ? 1000.0f / this->idle_update_interval_ : 0.0f);
 }

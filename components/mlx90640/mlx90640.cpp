@@ -1,5 +1,7 @@
 #include "mlx90640.h"
+#ifdef USE_MLX90640_WEB
 #include "heatmap_page.h"
+#endif
 #ifdef USE_MLX90640_CAMERA
 #include "mlx90640_camera.h"
 #endif
@@ -53,7 +55,7 @@ static const SettingInfo SETTINGS[SETTING_COUNT] = {
     {"jpeg_quality", 10, 100, 80, true},
 };
 
-MLX90640Component::MLX90640Component(web_server_base::WebServerBase *base) : base_(base) {
+MLX90640Component::MLX90640Component() {
   for (int i = 0; i < SETTING_COUNT; i++)
     this->settings_[i] = SETTINGS[i].def;
 }
@@ -195,8 +197,10 @@ bool MLX90640Component::init_sensor_() {
 // ---------------------------------------------------------------- lifecycle
 
 void MLX90640Component::setup() {
+#ifdef USE_MLX90640_WEB
   this->base_->init();
   this->base_->add_handler(this);
+#endif
   this->init_sensor_();
   this->setup_done_ = true;
 }
@@ -208,12 +212,14 @@ void MLX90640Component::dump_config() {
                 "  Status: %s\n"
                 "  Sub-page rate: %.1f Hz, ADC: %d-bit, pattern: %s\n"
                 "  Emissivity: %.2f\n"
-                "  Bad/outlier pixels: %u\n"
-                "  Heatmap: http://<device>/thermal  (JSON: /thermal.json)",
+                "  Bad/outlier pixels: %u",
                 this->ready_ ? "OK" : "NOT RESPONDING", RATE_HZ[static_cast<int>(this->settings_[SETTING_REFRESH_RATE])],
                 16 + static_cast<int>(this->settings_[SETTING_RESOLUTION]),
                 this->flag_(SETTING_PATTERN) ? "interleaved" : "chess", this->settings_[SETTING_EMISSIVITY],
                 static_cast<unsigned>(this->bad_pixel_count_));
+#ifdef USE_MLX90640_WEB
+  ESP_LOGCONFIG(TAG, "  Heatmap: http://<device>/thermal  (JSON: /thermal.json, image: /thermal.jpg)");
+#endif
   LOG_UPDATE_INTERVAL(this);
   LOG_SENSOR("  ", "Min", this->min_sensor_);
   LOG_SENSOR("  ", "Max", this->max_sensor_);
@@ -379,6 +385,7 @@ void MLX90640Component::copy_display_frame(float *dst) const {
 
 // ---------------------------------------------------------------- web
 
+#ifdef USE_MLX90640_WEB
 bool MLX90640Component::canHandle(AsyncWebServerRequest *request) const {
   char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
   StringRef url = request->url_to(url_buf);
@@ -481,5 +488,6 @@ void MLX90640Component::handleRequest(AsyncWebServerRequest *request) {
   stream->print("]}");
   request->send(stream);
 }
+#endif  // USE_MLX90640_WEB
 
 }  // namespace esphome::mlx90640
