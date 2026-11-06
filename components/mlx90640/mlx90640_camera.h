@@ -84,8 +84,9 @@ class MLX90640Camera : public camera::Camera, public Parented<MLX90640Component>
   void start_stream(camera::CameraRequester requester) override;
   void stop_stream(camera::CameraRequester requester) override;
 
-  /// For the web snapshot endpoint (any task): request a new image, wait up to
-  /// timeout_ms for it, and return the newest one available (may be null).
+  /// For the web snapshot endpoint (any task): returns the newest image straight away
+  /// if it shows the current frame and settings (or is very recent); otherwise requests
+  /// a new one and waits up to timeout_ms for it. May return null.
   std::shared_ptr<camera::CameraImage> get_fresh_image(uint32_t timeout_ms);
 
  protected:
@@ -99,6 +100,8 @@ class MLX90640Camera : public camera::Camera, public Parented<MLX90640Component>
     float range_min;
     float range_max;
     uint8_t requesters;
+    uint32_t frame;       // parent frame count when captured
+    uint32_t generation;  // parent settings generation when captured
   };
   enum State : uint8_t { STATE_IDLE = 0, STATE_BUSY, STATE_DONE };
 
@@ -128,14 +131,18 @@ class MLX90640Camera : public camera::Camera, public Parented<MLX90640Component>
   std::vector<float> wx_;
   uint8_t *line_{nullptr};
 
-  // Newest image, for /thermal.jpg
+  // Newest image and what it shows, for /thermal.jpg (guarded by latest_mutex_)
   std::mutex latest_mutex_;
   std::shared_ptr<camera::CameraImage> latest_;
+  uint32_t latest_frame_{0};
+  uint32_t latest_generation_{0};
+  uint32_t latest_ms_{0};
   std::atomic<uint32_t> image_seq_{0};
 
   uint32_t last_render_ms_{0};
   uint32_t last_idle_ms_{0};
   uint32_t last_frame_rendered_{0};
+  uint32_t last_generation_rendered_{0};
   uint32_t last_encode_ms_{0};
   size_t last_size_{0};
 };

@@ -5,11 +5,15 @@ platforms of this component (see those sub-packages). An optional `camera:`
 block adds a camera entity (JPEG) that Home Assistant shows natively.
 """
 
+import gzip
+import hashlib
+from pathlib import Path
+
 import esphome.codegen as cg
-from esphome.components import i2c, sensor, web_server_base
-from esphome.components.web_server_base import CONF_WEB_SERVER_BASE_ID
+from esphome.components import i2c, sensor
 import esphome.config_validation as cv
 from esphome.core.entity_helpers import setup_entity
+import esphome.final_validate as fv
 from esphome.const import (
     CONF_ID,
     DEVICE_CLASS_TEMPERATURE,
@@ -22,7 +26,17 @@ from esphome.const import (
 )
 
 DEPENDENCIES = ["i2c", "esp32"]
-AUTO_LOAD = ["sensor", "web_server_base", "camera"]
+
+
+def AUTO_LOAD(config=None):
+    # A falsy config is a tooling probe for the full set.
+    loads = ["sensor"]
+    if not config or config.get(CONF_WEB_UI, True):
+        loads.append("web_server_base")
+    if not config or CONF_CAMERA in config:
+        loads.append("camera")
+    return loads
+
 
 CONF_MLX90640_ID = "mlx90640_id"
 CONF_REFRESH_RATE = "refresh_rate"
@@ -33,6 +47,9 @@ CONF_JPEG_QUALITY = "jpeg_quality"
 CONF_MAX_FRAMERATE = "max_framerate"
 CONF_IDLE_FRAMERATE = "idle_framerate"
 CONF_OVERLAY = "overlay"
+CONF_WEB_UI = "web_ui"
+
+PAGE_FILE = Path(__file__).parent / "heatmap.html"
 
 CAMERA_RESOLUTIONS = {
     "160x120": (160, 120),
@@ -135,13 +152,12 @@ SENSORS = {
     ),
 }
 
-CONFIG_SCHEMA = (
+CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(MLX90640Component),
-            cv.GenerateID(CONF_WEB_SERVER_BASE_ID): cv.use_id(
-                web_server_base.WebServerBase
-            ),
+            # Heatmap page and data endpoints under /thermal (uses the web server on port 80)
+            cv.Optional(CONF_WEB_UI, default=True): cv.boolean,
             # Defaults; the matching select/number entities (if configured)
             # override these with their saved values.
             cv.Optional(CONF_REFRESH_RATE, default="4Hz"): cv.enum(
@@ -158,15 +174,47 @@ CONFIG_SCHEMA = (
         }
     )
     .extend(cv.polling_component_schema("10s"))
-    .extend(i2c.i2c_device_schema(0x33))
+    .extend(i2c.i2c_device_schema(0x33)),
+    # Oldest release with the entity/camera/web server APIs used here
+    cv.require_esphome_version(2026, 8, 0),
 )
 
 
+def _final_validate(config):
+    full_config = fv.full_config.get()
+    if CONF_CAMERA in config and "esp32_camera" in full_config:
+        raise cv.Invalid(
+            "ESPHome supports one camera per device: remove 'camera:' from mlx90640 "
+            "or the esp32_camera component",
+            path=[CONF_CAMERA],
+        )
+    return config
+
+
+FINAL_VALIDATE_SCHEMA = _final_validate
+
+
+def _add_page(var):
+    """Embed heatmap.html gzipped, with an ETag so browsers can cache it."""
+    page = gzip.compress(PAGE_FILE.read_bytes(), compresslevel=9, mtime=0)
+    etag = '"' + hashlib.sha256(page).hexdigest()[:16] + '"'
+    data = ",".join(str(b) for b in page)
+    cg.add_global(
+        cg.RawStatement(
+            f"static const uint8_t MLX90640_HEATMAP_GZ[{len(page)}] = {{{data}}};"
+        )
+    )
+    cg.add(var.set_page(cg.RawExpression("MLX90640_HEATMAP_GZ"), len(page), etag))
+
+
 async def to_code(config):
-    base = await cg.get_variable(config[CONF_WEB_SERVER_BASE_ID])
-    var = cg.new_Pvariable(config[CONF_ID], base)
+    var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
+
+    if config[CONF_WEB_UI]:
+        cg.add_define("USE_MLX90640_WEB_UI")
+        _add_page(var)
 
     cg.add(var.set_refresh_rate(REFRESH_RATES[config[CONF_REFRESH_RATE]]))
     cg.add(var.set_resolution(RESOLUTIONS[config[CONF_RESOLUTION]]))

@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  calc-test:
+    name: Temperature maths vs Melexis reference
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/run_calc_test.sh
+
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ESP32-S3 (full example)
+            config: ci-esp32s3.yaml
+            board: seeed_xiao_esp32s3
+            sda: GPIO5
+            scl: GPIO6
+          - name: ESP32 without PSRAM (full example)
+            config: ci-esp32.yaml
+            board: esp32dev
+            sda: GPIO21
+            scl: GPIO22
+          - name: ESP32 minimal (no web UI, no camera)
+            config: minimal.yaml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.esphome
+            tests/.esphome
+          key: esphome-${{ matrix.config }}-${{ hashFiles('components/**') }}
+          restore-keys: esphome-${{ matrix.config }}-
+      - run: pip install esphome
+      - name: Prepare configs
+        working-directory: tests
+        run: |
+          cat > secrets.yaml <<'EOF'
+          wifi_ssid: ci
+          wifi_password: ci-password
+          ota_password: ci-password
+          api_encryption_key: MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
+          EOF
+          if [ -n "${{ matrix.board }}" ]; then
+            sed -e 's|^  - source: github://OWNER/REPO.*|  - source: {type: local, path: ../components}|' \
+                -e 's|board: seeed_xiao_esp32s3.*|board: ${{ matrix.board }}|' \
+                -e 's|  sda: GPIO5|  sda: ${{ matrix.sda }}|' \
+                -e 's|  scl: GPIO6|  scl: ${{ matrix.scl }}|' \
+                ../example/thermal-camera.yaml > ${{ matrix.config }}
+            grep -q 'type: local' ${{ matrix.config }}
+          fi
+      - working-directory: tests
+        run: esphome config ${{ matrix.config }}
+      - working-directory: tests
+        run: esphome compile ${{ matrix.config }}

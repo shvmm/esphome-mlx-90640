@@ -112,7 +112,8 @@ void MLX90640Camera::setup() {
     this->x1_[x] = static_cast<uint8_t>(std::min(x0 + 1, MLX_COLS - 1));
     this->wx_[x] = fx - x0;
   }
-  this->line_ = RAMAllocator<uint8_t>().allocate(this->width_ * 3);
+  // Touched for every pixel, so keep it in internal RAM when possible.
+  this->line_ = RAMAllocator<uint8_t>(RAMAllocator<uint8_t>::PREFER_INTERNAL).allocate(this->width_ * 3);
   if (this->line_ == nullptr) {
     ESP_LOGE(TAG, "Out of memory for scanline buffer");
     this->mark_failed();
@@ -150,6 +151,17 @@ void MLX90640Camera::stop_stream(camera::CameraRequester requester) {
 }
 
 std::shared_ptr<camera::CameraImage> MLX90640Camera::get_fresh_image(uint32_t timeout_ms) {
+  {
+    // The parent's counters are plain 32-bit values written by the main loop; a stale
+    // read here only means one extra render.
+    std::lock_guard<std::mutex> lock(this->latest_mutex_);
+    if (this->latest_ != nullptr) {
+      const bool current = this->latest_frame_ == this->parent_->get_frame_count() &&
+                           this->latest_generation_ == this->parent_->get_settings_generation();
+      if (current || millis() - this->latest_ms_ < this->max_update_interval_)
+        return this->latest_;
+    }
+  }
   const uint32_t seq = this->image_seq_.load();
   this->request_image(camera::WEB_REQUESTER);
   const uint32_t start = millis();
@@ -168,6 +180,9 @@ void MLX90640Camera::loop() {
       {
         std::lock_guard<std::mutex> lock(this->latest_mutex_);
         this->latest_ = image;
+        this->latest_frame_ = this->job_.frame;
+        this->latest_generation_ = this->job_.generation;
+        this->latest_ms_ = millis();
       }
       this->image_seq_.fetch_add(1);
       for (auto *listener : this->listeners_)
@@ -188,9 +203,10 @@ void MLX90640Camera::loop() {
   const bool idle_due = this->idle_update_interval_ != 0 && now - this->last_idle_ms_ >= this->idle_update_interval_;
   bool wanted = this->single_requesters_.load() != 0 || idle_due;
   if (!wanted && streaming != 0) {
-    // While streaming, only encode new sensor frames, at most max_framerate.
+    // While streaming, only encode new frames (or setting changes), at most max_framerate.
     wanted = now - this->last_render_ms_ >= this->max_update_interval_ &&
-             this->parent_->get_frame_count() != this->last_frame_rendered_;
+             (this->parent_->get_frame_count() != this->last_frame_rendered_ ||
+              this->parent_->get_settings_generation() != this->last_generation_rendered_);
   }
   if (!wanted)
     return;
@@ -210,9 +226,12 @@ void MLX90640Camera::loop() {
   job.range_min = this->parent_->get_setting(SETTING_RANGE_MIN);
   job.range_max = this->parent_->get_setting(SETTING_RANGE_MAX);
   job.requesters = requesters;
+  job.frame = this->parent_->get_frame_count();
+  job.generation = this->parent_->get_settings_generation();
 
   this->last_render_ms_ = now;
-  this->last_frame_rendered_ = this->parent_->get_frame_count();
+  this->last_frame_rendered_ = job.frame;
+  this->last_generation_rendered_ = job.generation;
   this->state_.store(STATE_BUSY);
   xTaskNotifyGive(this->task_);
 }

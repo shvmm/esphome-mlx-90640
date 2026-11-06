@@ -1,0 +1,129 @@
+# Example: MLX90640 thermal camera on a Seeed XIAO ESP32-S3.
+# Copy this file next to a secrets.yaml with wifi_ssid / wifi_password /
+# api_encryption_key / ota_password, adjust the pins, and flash.
+
+substitutions:
+  name: thermal-camera
+  friendly_name: Thermal Camera
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: seeed_xiao_esp32s3   # any ESP32 works; PSRAM is optional
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${name} fallback"
+
+captive_portal:
+
+# Optional: the normal ESPHome page at http://<device>/. The heatmap at
+# /thermal works with or without it.
+web_server:
+  port: 80
+  version: 3
+  # Optional link bar (Heatmap, Snapshot, ...) at the top of the ESPHome page:
+  # js_include: home_links.js   # copy web/home_links.js from this repository
+
+external_components:
+  - source: github://OWNER/REPO   # replace with this repository
+    components: [mlx90640]
+
+# XIAO ESP32-S3: D4 = GPIO5 (SDA), D5 = GPIO6 (SCL). Power the sensor from 3V3.
+i2c:
+  sda: GPIO5
+  scl: GPIO6
+  # 1 MHz is best; 400kHz is fine up to 8-16 Hz refresh rates.
+  frequency: 1MHz
+
+mlx90640:
+  id: thermal
+  refresh_rate: 4Hz
+  resolution: 18
+  emissivity: 0.95
+  update_interval: 10s     # how often the sensors below are sent to Home Assistant
+  min_temperature:
+    name: "Min Temperature"
+  max_temperature:
+    name: "Max Temperature"
+  mean_temperature:
+    name: "Mean Temperature"
+  center_temperature:
+    name: "Center Temperature"
+  ambient_temperature:
+    name: "Sensor Die Temperature"
+  frame_rate:
+    name: "Frame Rate"
+  supply_voltage:
+    name: "Sensor Supply Voltage"
+  bad_pixels:
+    name: "Bad Pixels"
+  i2c_errors:
+    name: "I2C Errors"
+  camera:
+    name: "Thermal Camera"
+    resolution: 320x240
+
+select:
+  - platform: mlx90640
+    refresh_rate:
+      name: "Refresh Rate"
+    resolution:
+      name: "ADC Resolution"
+    pattern:
+      name: "Readout Pattern"
+    palette:
+      name: "Heatmap Palette"
+
+number:
+  - platform: mlx90640
+    emissivity:
+      name: "Emissivity"
+    reflected_offset:
+      name: "Reflected Temperature Offset"
+    smoothing:
+      name: "Smoothing"
+    range_min:
+      name: "Heatmap Range Min"
+    range_max:
+      name: "Heatmap Range Max"
+    publish_interval:
+      name: "HA Publish Interval"
+    jpeg_quality:
+      name: "Camera JPEG Quality"
+
+switch:
+  - platform: mlx90640
+    interpolate_bad_pixels:
+      name: "Fix Bad Pixels"
+    auto_range:
+      name: "Heatmap Auto Range"
+    mirror:
+      name: "Heatmap Mirror"
+    rotate_180:
+      name: "Heatmap Rotate 180"
+    freeze:
+      name: "Freeze Heatmap"
+    camera_overlay:
+      name: "Camera Overlay"
+
+button:
+  - platform: mlx90640
+    reinitialize:
+      name: "Reinitialize Sensor"

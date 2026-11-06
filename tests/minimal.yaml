@@ -1,0 +1,52 @@
+# CI build without the web UI and camera (checks the optional code paths compile).
+esphome:
+  name: mlx90640-minimal
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+
+wifi:
+  ssid: ci
+  password: ci-password
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [mlx90640]
+
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  frequency: 400kHz
+
+mlx90640:
+  web_ui: false
+  max_temperature:
+    name: "Max Temperature"
+
+select:
+  - platform: mlx90640
+    refresh_rate:
+      name: "Refresh Rate"
+
+number:
+  - platform: mlx90640
+    emissivity:
+      name: "Emissivity"
+
+switch:
+  - platform: mlx90640
+    mirror:
+      name: "Mirror"
+
+button:
+  - platform: mlx90640
+    reinitialize:
+      name: "Reinitialize"

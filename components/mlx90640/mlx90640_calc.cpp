@@ -11,6 +11,15 @@ static inline int sx(int v, int bits) {
 }
 static inline float s16(uint16_t v) { return static_cast<float>(static_cast<int16_t>(v)); }
 
+bool mlx_eeprom_plausible(const uint16_t *ee) {
+  bool all_same = true;
+  for (int i = 1; i < MLX_EEPROM_WORDS && all_same; i++)
+    all_same = ee[i] == ee[0];
+  // These calibration values divide later on, so zero means the data is not real.
+  const bool zero_divisor = ((ee[51] >> 8) & 0xFF) == 0 || ee[48] == 0 || (ee[50] & 0x3FF) == 0;
+  return !all_same && !zero_divisor;
+}
+
 void mlx_extract_parameters(const uint16_t *ee, MLX90640Params *p) {
   // --- Supply voltage ---
   p->kVdd = static_cast<int16_t>(sx((ee[51] >> 8) & 0xFF, 8) * 32);
@@ -96,6 +105,8 @@ void mlx_extract_parameters(const uint16_t *ee, MLX90640Params *p) {
   kv_rc[2] = sx((ee[52] >> 8) & 0xF, 4);
   kv_rc[1] = sx((ee[52] >> 4) & 0xF, 4);
   kv_rc[3] = sx(ee[52] & 0xF, 4);
+  for (int i = 0; i < 4; i++)
+    p->kvRC[i] = ldexpf(static_cast<float>(kv_rc[i]), -kv_scale);
 
   for (int row = 0; row < MLX_ROWS; row++) {
     for (int col = 0; col < MLX_COLS; col++) {
@@ -108,13 +119,11 @@ void mlx_extract_parameters(const uint16_t *ee, MLX90640Params *p) {
       p->alpha[px] = ldexpf(static_cast<float>(a), -alpha_scale);
 
       int o = sx((w >> 10) & 0x3F, 6) * (1 << occ_rem_scale);
-      p->offset[px] = static_cast<float>(offset_ref + occ_row[row] * (1 << occ_row_scale) +
-                                         occ_col[col] * (1 << occ_col_scale) + o);
+      p->offset[px] = static_cast<int16_t>(offset_ref + occ_row[row] * (1 << occ_row_scale) +
+                                           occ_col[col] * (1 << occ_col_scale) + o);
 
       int k = sx((w >> 1) & 0x7, 3) * (1 << kta_scale2);
       p->kta[px] = ldexpf(static_cast<float>(kta_rc[split] + k), -kta_scale1);
-
-      p->kv[px] = ldexpf(static_cast<float>(kv_rc[split]), -kv_scale);
 
       p->bad[px] = (w == 0) ? 1 : ((w & 0x1) ? 2 : 0);
     }
@@ -125,6 +134,22 @@ void mlx_extract_parameters(const uint16_t *ee, MLX90640Params *p) {
   p->ilChessC[0] = sx(ee[53] & 0x3F, 6) / 16.0f;
   p->ilChessC[1] = sx((ee[53] >> 6) & 0x1F, 5) / 2.0f;
   p->ilChessC[2] = sx((ee[53] >> 11) & 0x1F, 5) / 8.0f;
+}
+
+bool mlx_frame_valid(const uint16_t *frame) {
+  // First pixel of every row the current sub-page wrote (same check as the Melexis driver)
+  const int sub_page = frame[833] & 1;
+  for (int row = sub_page; row < MLX_ROWS; row += 2)
+    if (frame[row * MLX_COLS] == 0x7FFF)
+      return false;
+  // Auxiliary words that carry data (gaps are unused addresses)
+  static const uint8_t AUX_RANGES[][2] = {{0, 1}, {8, 19}, {20, 23}, {24, 33}, {40, 51}, {52, 55}, {56, 64}};
+  const uint16_t *aux = frame + MLX_PIXELS;
+  for (const auto &r : AUX_RANGES)
+    for (int i = r[0]; i < r[1]; i++)
+      if (aux[i] == 0x7FFF)
+        return false;
+  return true;
 }
 
 float mlx_get_vdd(const uint16_t *frame, const MLX90640Params *p) {
@@ -179,9 +204,10 @@ void mlx_calculate_to(const uint16_t *frame, const MLX90640Params *p, float emis
     const int pattern = (mode == 0) ? il_pattern : chess_pattern;
     if (pattern != sub_page)
       continue;
+    const int split = 2 * il_pattern + (px & 1);
 
     float ir = s16(frame[px]) * gain;
-    ir -= p->offset[px] * (1.0f + p->kta[px] * dta) * (1.0f + p->kv[px] * dvdd);
+    ir -= p->offset[px] * (1.0f + p->kta[px] * dta) * (1.0f + p->kvRC[split] * dvdd);
     if (mode != p->calibrationModeEE) {
       const int conversion_pattern =
           ((px + 2) / 4 - (px + 3) / 4 + (px + 1) / 4 - px / 4) * (1 - 2 * il_pattern);

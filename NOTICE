@@ -1,0 +1,18 @@
+MLX90640 thermal camera component for ESPHome
+Copyright 2026 the contributors of this project
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project includes or is derived from the following third-party work:
+
+* components/mlx90640/mlx90640_calc.cpp, mlx90640_calc.h
+  The calibration and temperature calculations follow the Melexis MLX90640
+  datasheet and the Melexis reference driver
+  (https://github.com/melexis/mlx90640-library),
+  Copyright Melexis N.V., licensed under the Apache License, Version 2.0.
+
+* components/mlx90640/jpge.cpp, jpge.h
+  jpge JPEG encoder by Rich Geldreich (public domain), taken from Espressif's
+  esp32-camera 2.1.7 (https://github.com/espressif/esp32-camera, Apache
+  License, Version 2.0). Changes: namespace renamed to mlx_jpge and the header
+  guard renamed.
